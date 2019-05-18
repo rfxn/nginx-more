@@ -7,18 +7,19 @@
 %global nginx_confdir		%{_sysconfdir}/nginx
 %global nginx_datadir		%{_datadir}/nginx
 %global nginx_webroot		%{nginx_datadir}/html
-%global openssl_version		1.1.1a
+%global openssl_version		1.1.1b
 %global module_ps			1.13.35.2-stable
 %global module_headers_more	0.33
 %global module_cache_purge	2.3
 %global module_vts			0.1.18
-%global module_brotli		snap20180222
+%global module_brotli		snap20190307
 %global module_geoip2		3.2
+%global module_echo			0.61
 
 %define use_systemd (0%{?fedora} && 0%{?fedora} >= 18) || (0%{?rhel} && 0%{?rhel} >= 7)
 
 Name:						nginx-more
-Version:					1.14.2
+Version:					1.16.0
 Release:					2%{?dist}
 
 Summary:					A high performance web server and reverse proxy server
@@ -54,6 +55,9 @@ Source25:					blacklist.conf
 Source26:					fpm-default-users.conf
 Source27:					fpm-laravel-users.conf
 Source28:					fpm-wordpress-users.conf
+Source29:					fpm-sendy.conf
+Source30:					fpm-sendy-users.conf
+Source31:					restrictions-users.conf
 
 Source100:					openssl-%{openssl_version}.tar.gz
 Source101:					ngx_pagespeed-%{module_ps}.tar.gz
@@ -63,8 +67,10 @@ Source104:					ngx_cache_purge-%{module_cache_purge}.tar.gz
 Source105:					ngx_brotli-%{module_brotli}.tar.gz
 Source106:					ngx_module_vts-%{module_vts}.tar.gz
 Source107:					ngx_http_geoip2_module-%{module_geoip2}.tar.gz
+Source108:					ngx_echo-%{module_echo}.tar.gz
 
 Patch0:						nginx-version.patch
+Patch1:						ngx_cache_purge-fix-compatibility-with-nginx-1.11.6.patch
 
 BuildRequires:				devtoolset-7-gcc-c++ devtoolset-7-binutils
 BuildRequires:				libxslt-devel
@@ -76,7 +82,10 @@ BuildRequires:				gd-devel
 BuildRequires:				httpd-devel
 BuildRequires:				libuuid-devel
 BuildRequires:				libmaxminddb-devel
-%{?el7:BuildRequires:		GeoIP-devel}
+
+%if 0%{?rhel} == 7
+BuildRequires:				GeoIP-devel
+%endif
 
 Requires:					gd
 Requires:					pcre
@@ -100,9 +109,10 @@ Provides:					nginx
 
 %description
 Nginx-more is a build of Nginx with additional open source modules
-such as PageSpeed, More Headers, Cache Purge, VTS. It's compiled
-using recent GCC version and latest OpenSSL sources. It also includes
-built-in configurations such as WordPress and Laravel php-fpm setup.
+such as PageSpeed, More Headers, Cache Purge, virtual host traffic status,
+GeoIP2. It's compiled using recent GCC version and latest OpenSSL sources.
+It also includes built-in configurations such as WordPress/Laravel php-fpm
+setup, bad user-agents blocking, TCP_FASTOPEN, Cloudflare IPs, and more.
 
 Nginx is a web server and a reverse proxy server for HTTP, SMTP, POP3 and
 IMAP protocols, with a strong focus on high concurrency, performance and low
@@ -111,8 +121,6 @@ memory usage.
 
 %prep
 %setup -q -n %{packagename}-%{version}
-%patch0 -p0
-
 
 mkdir modules
 tar -zxvf %{SOURCE100} -C modules/
@@ -123,6 +131,12 @@ tar -zxvf %{SOURCE104} -C modules/
 tar -zxvf %{SOURCE105} -C modules/
 tar -zxvf %{SOURCE106} -C modules/
 tar -zxvf %{SOURCE107} -C modules/
+tar -zxvf %{SOURCE108} -C modules/
+
+%{__sed} -i 's_@CACHEPVER@_%{module_cache_purge}_' %{PATCH1}
+
+%patch0 -p0
+%patch1 -p0
 
 %build
 export DESTDIR=%{buildroot}
@@ -144,7 +158,6 @@ export DESTDIR=%{buildroot}
 	--group=%{nginx_group} \
 	--with-compat \
 	--with-file-aio \
-	--with-ipv6 \
 	--with-http_ssl_module \
 	--with-http_realip_module \
 	--with-http_addition_module \
@@ -155,7 +168,7 @@ export DESTDIR=%{buildroot}
 	--with-http_mp4_module \
 	--with-http_gunzip_module \
 	--with-http_gzip_static_module \
-	%if 0%{?rhel} >= 7
+	%if 0%{?rhel} == 7
 		--with-http_geoip_module \
 	%endif
 	--with-http_random_index_module \
@@ -182,7 +195,8 @@ export DESTDIR=%{buildroot}
 	--add-module=modules/ngx_module_vts-%{module_vts} \
 	--add-module=modules/ngx_pagespeed-%{module_ps} \
 	--add-module=modules/ngx_brotli-%{module_brotli} \
-	--add-module=modules/ngx_http_geoip2_module-%{module_geoip2}
+	--add-module=modules/ngx_http_geoip2_module-%{module_geoip2} \
+	--add-module=modules/ngx_echo-%{module_echo}
 
 make
 
@@ -221,7 +235,7 @@ install -p -d -m 0755 %{buildroot}%{nginx_webroot}
 
 install -p -m 0644 %{SOURCE4} %{buildroot}%{nginx_confdir}
 
-install -p -m 0644 %{SOURCE10} %{SOURCE11} %{SOURCE12} %{SOURCE13} %{SOURCE14} %{SOURCE15} %{SOURCE16} %{SOURCE18} %{SOURCE19} %{SOURCE20} %{SOURCE21} %{SOURCE22} %{SOURCE23} %{SOURCE24} %{SOURCE25} %{SOURCE26} %{SOURCE27} %{SOURCE28} \
+install -p -m 0644 %{SOURCE10} %{SOURCE11} %{SOURCE12} %{SOURCE13} %{SOURCE14} %{SOURCE15} %{SOURCE16} %{SOURCE18} %{SOURCE19} %{SOURCE20} %{SOURCE21} %{SOURCE22} %{SOURCE23} %{SOURCE24} %{SOURCE25} %{SOURCE26} %{SOURCE27} %{SOURCE28} %{SOURCE29} %{SOURCE30} %{SOURCE31} \
 	%{buildroot}%{nginx_confdir}/conf.d/custom
 install -p -m 0644 %{SOURCE17} \
 	%{buildroot}%{nginx_confdir}/conf.d/vhosts
@@ -344,6 +358,18 @@ fi
 
 
 %changelog
+* Wed May 15 2019 Karl Johnson <karljohnson.it@gmail.com> - 1.16.0-2
+- Bump to Nginx 1.16.0
+- Remove obsolete "--with-ipv6" and "ssl on"
+- Refresh bad user-agents list
+- Add 1.1.1.1 as resolver
+- Make restrictions.conf compatible with multiple fpm users
+
+* Thu Mar 7 2019 Karl Johnson <karljohnson.it@gmail.com> - 1.14.2-3
+- Bump OpenSSL 1.1.1b, Brotli 1.0.4
+- Add new module ngx_echo
+- Add patch1 to fix module ngx_cache_purge on recent nginx
+
 * Fri Dec 14 2018 Karl Johnson <karljohnson.it@gmail.com> - 1.14.2-2
 - Add module geoip2 3.2 with latest libmaxminddb 1.3.2
 
